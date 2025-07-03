@@ -28,3 +28,8 @@ objc2-app-kit = { version = "0.3.1" }
 [dev-dependencies]
 wae = "0.2.0"
 winit = "0.30.11"
+openidconnect = { version = "4.0.0", default-features = false }
+anyhow = "1.0.98"
+clap = { version = "4.5.40", features = ["derive"] }
+nyquest = { version = "0.2.0", features = ["async"] }
+nyquest-preset = { version = "0.2.0", default-features = false, features = ["async"] }

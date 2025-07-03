@@ -1,30 +1,32 @@
 use std::sync::atomic::AtomicBool;
 
+use clap::Parser;
 use url::Url;
 use wae::{Hook, WindowHandler, WinitWindow};
 use webauth::{WebAuthOptions, WebAuthSession};
 
+#[path = "basic/http_client.rs"]
+mod http_client;
+#[path = "basic/openid.rs"]
+mod openid;
+
+#[derive(Parser)]
+struct Args {
+    #[clap(short, long)]
+    auth_url: String,
+    #[clap(short = 'i', long)]
+    client_id: String,
+}
+
 fn main() {
-    // let auth_url = Url::parse("https://example.com/auth").expect("Failed to parse URL");
-
-    // let run_loop = irondash_run_loop::RunLoop::current();
-    // let sender = run_loop.new_sender();
-    // run_loop.spawn(async move {
-    //     let result = WebAuthSession::authenticate(&auth_url, "com.dungeonfog.foobar").await;
-    //     println!("Auth Result: {result:?}");
-
-    //     sender.send(|| {
-    //         RunLoop::current().stop();
-    //     })
-    // });
-
-    // run_loop.run();
-
+    let args = Args::parse();
+    nyquest_preset::register();
     wae::run(async move {
         let win = std::rc::Rc::new(Window::default());
         let app = std::rc::Rc::new(Application {
             auth_requested: AtomicBool::new(false),
             main_window: win.clone(),
+            args,
         });
 
         wae::register_window(&win);
@@ -72,6 +74,7 @@ impl WindowHandler for Window {
 struct Application {
     auth_requested: AtomicBool,
     main_window: std::rc::Rc<Window>,
+    args: Args,
 }
 
 impl Hook for Application {
@@ -83,8 +86,9 @@ impl Hook for Application {
             .swap(true, std::sync::atomic::Ordering::Relaxed)
         {
             let main_window = self.main_window.clone();
+            let auth_url = self.args.auth_url.clone();
+            let client_id = self.args.client_id.clone();
             wae::spawn(async move {
-                let auth_url = Url::parse("https://example.com/auth").expect("Failed to parse URL");
                 let mut options = WebAuthOptions::default();
                 #[cfg(target_os = "macos")]
                 {
@@ -107,9 +111,21 @@ impl Hook for Application {
 
                     options.window = Some(window);
                 }
-                let result =
-                    WebAuthSession::authenticate(&auth_url, "com.dungeonfog.foobar", options).await;
-                println!("Auth Result: {result:?}");
+                let (token, _) = openid::run(
+                    auth_url,
+                    client_id,
+                    Url::parse("com.dungeonfog.foobar:authorized").unwrap(),
+                    async |url| {
+                        Ok(
+                            WebAuthSession::authenticate(&url, "com.dungeonfog.foobar", options)
+                                .await?
+                                .to_string(),
+                        )
+                    },
+                )
+                .await
+                .expect("Failed openid");
+                println!("Auth Result: {token:?}");
             });
         }
         Ok(winit::event_loop::ControlFlow::Wait)
