@@ -51,7 +51,7 @@ impl WebAuthSession {
             }
         });
 
-        eprintln!("Calling ASWebAuthenticationSession with URL: {}", auth_url);
+        eprintln!("Calling ASWebAuthenticationSession with URL: {auth_url}");
 
         unsafe {
             let mtm = MainThreadMarker::new().ok_or(Error::NeedsToRunOnMainThread)?;
