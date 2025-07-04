@@ -14,7 +14,7 @@ pub async fn run(
     issuer_url: String,
     client_id: String,
     redirect_url: Url,
-    get_code: impl AsyncFnOnce(Url) -> anyhow::Result<String>,
+    get_code: impl AsyncFnOnce(Url) -> anyhow::Result<(String, String)>,
 ) -> anyhow::Result<(CoreTokenResponse, CoreIdTokenClaims)> {
     let http_client = BasicHttpClient::new().await?;
 
@@ -30,7 +30,7 @@ pub async fn run(
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
 
     // Generate the full authorization URL.
-    let (auth_url, _csrf_token, nonce) = client
+    let (auth_url, csrf_token, nonce) = client
         .authorize_url(
             CoreAuthenticationFlow::AuthorizationCode,
             CsrfToken::new_random,
@@ -41,7 +41,10 @@ pub async fn run(
         .set_pkce_challenge(pkce_challenge)
         .url();
 
-    let authorization_code = get_code(auth_url).await?;
+    let (authorization_code, csrf_state) = get_code(auth_url).await?;
+    if csrf_state != csrf_token.into_secret() {
+        anyhow::bail!("CSRF Token mismatch");
+    }
 
     // Now you can exchange it for an access token and ID token.
     let token_response = client
@@ -54,7 +57,10 @@ pub async fn run(
     let id_token = token_response
         .id_token()
         .ok_or_else(|| anyhow::anyhow!("Server did not return an ID token"))?;
-    let id_token_verifier = client.id_token_verifier();
+    // Zitadel adds all projects the user has access to to the audience, so we just have to ignore them.
+    let id_token_verifier = client
+        .id_token_verifier()
+        .set_other_audience_verifier_fn(|_| true);
     let claims = id_token.claims(&id_token_verifier, &nonce)?.clone();
 
     if let Some(expected_access_token_hash) = claims.access_token_hash() {

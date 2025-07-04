@@ -1,6 +1,7 @@
 use std::sync::atomic::AtomicBool;
 
 use clap::Parser;
+use openidconnect::OAuth2TokenResponse;
 use url::Url;
 use wae::{Hook, WindowHandler, WinitWindow};
 use webauth::{WebAuthOptions, WebAuthSession};
@@ -14,7 +15,7 @@ mod openid;
 struct Args {
     #[clap(short, long)]
     auth_url: String,
-    #[clap(short = 'i', long)]
+    #[clap(short, long)]
     client_id: String,
 }
 
@@ -116,16 +117,32 @@ impl Hook for Application {
                     client_id,
                     Url::parse("com.dungeonfog.foobar:authorized").unwrap(),
                     async |url| {
-                        Ok(
+                        let result_url =
                             WebAuthSession::authenticate(&url, "com.dungeonfog.foobar", options)
-                                .await?
-                                .to_string(),
-                        )
+                                .await?;
+                        let mut code = None;
+                        let mut state = None;
+                        for (key, value) in result_url.query_pairs() {
+                            if key == "code" {
+                                code = Some(value.to_string());
+                            } else if key == "state" {
+                                state = Some(value.to_string());
+                            }
+                        }
+                        if let Some(code) = code
+                            && let Some(state) = state
+                        {
+                            Ok((code, state))
+                        } else {
+                            anyhow::bail!(
+                                "Authorization url doesn't contain both a code and a state"
+                            );
+                        }
                     },
                 )
                 .await
                 .expect("Failed openid");
-                println!("Auth Result: {token:?}");
+                println!("Access token: {:?}", token.access_token().secret());
             });
         }
         Ok(winit::event_loop::ControlFlow::Wait)
