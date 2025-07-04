@@ -20,8 +20,21 @@ struct Args {
 }
 
 fn main() {
+    tracing_subscriber::fmt::init();
     let args = Args::parse();
     nyquest_preset::register();
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+    ))]
+    {
+        gtk::init().unwrap();
+    }
+
     wae::run(async move {
         let win = std::rc::Rc::new(Window::default());
         let app = std::rc::Rc::new(Application {
@@ -86,21 +99,23 @@ impl Hook for Application {
             .auth_requested
             .swap(true, std::sync::atomic::Ordering::Relaxed)
         {
+            #[allow(unused)]
             let main_window = self.main_window.clone();
             let auth_url = self.args.auth_url.clone();
             let client_id = self.args.client_id.clone();
             wae::spawn(async move {
-                let mut options = WebAuthOptions::default();
+                let options = WebAuthOptions::default();
+                let window;
                 #[cfg(target_os = "macos")]
                 {
                     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
-                    let window = main_window
+                    let window_handle = main_window
                         .window
                         .window_handle()
                         .expect("Failed to get window handle");
 
-                    let RawWindowHandle::AppKit(window_handle) = window.as_raw() else {
+                    let RawWindowHandle::AppKit(window_handle) = window_handle.as_raw() else {
                         panic!("Expected AppKit window handle");
                     };
                     let view: objc2::rc::Retained<objc2_app_kit::NSView> = unsafe {
@@ -108,18 +123,35 @@ impl Hook for Application {
                         Retained::from_raw(window_handle.ns_view.as_ptr().cast())
                     }
                     .expect("Failed to retain NSView");
-                    let window = view.window().expect("Failed to get NSWindow from NSView");
+                    window = Some(view.window().expect("Failed to get NSWindow from NSView"));
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    use gtk::traits::WidgetExt;
 
-                    options.window = Some(window);
+                    window = gtk::Window::builder()
+                        .name("WebAuth Example")
+                        .resizable(true)
+                        .height_request(800)
+                        .width_request(800)
+                        .build();
+                    window.show_all();
                 }
                 let (token, _) = openid::run(
                     auth_url,
                     client_id,
                     Url::parse("com.dungeonfog.foobar:authorized").unwrap(),
                     async |url| {
-                        let result_url =
-                            WebAuthSession::authenticate(&url, "com.dungeonfog.foobar", options)
-                                .await?;
+                        let result_url = WebAuthSession::authenticate(
+                            &url,
+                            "com.dungeonfog.foobar",
+                            options,
+                            #[cfg(not(target_os = "linux"))]
+                            window,
+                            #[cfg(target_os = "linux")]
+                            &window,
+                        )
+                        .await?;
                         let mut code = None;
                         let mut state = None;
                         for (key, value) in result_url.query_pairs() {
@@ -144,6 +176,16 @@ impl Hook for Application {
                 .expect("Failed openid");
                 println!("Access token: {:?}", token.access_token().secret());
             });
+        }
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+        ))]
+        while gtk::events_pending() {
+            gtk::main_iteration_do(false);
         }
         Ok(winit::event_loop::ControlFlow::Wait)
     }

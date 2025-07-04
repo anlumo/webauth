@@ -21,15 +21,16 @@ impl WebAuthSession {
         auth_url: &url::Url,
         callback_scheme: &str,
         options: crate::WebAuthOptions,
+        window: Option<objc2::rc::Retained<objc2_app_kit::NSWindow>>, // None => use key window
     ) -> Result<url::Url, crate::error::Error> {
         let (sender, receiver) = futures::channel::oneshot::channel();
         let sender = RefCell::new(Some(sender));
         let completion_handler = RcBlock::new(move |url: *mut NSURL, error: *mut NSError| {
-            eprintln!("Completion handler called with URL: {url:?}, error: {error:?}");
+            tracing::trace!("Completion handler called with URL: {url:?}, error: {error:?}");
             if let Some(sender) = sender.take() {
                 if url.is_null() && !error.is_null() {
                     let error = unsafe { objc2::rc::Retained::retain(error) }.unwrap();
-                    eprintln!(
+                    tracing::error!(
                         "Error in ASWebAuthenticationSession: {:?}",
                         error.debugDescription()
                     );
@@ -51,12 +52,11 @@ impl WebAuthSession {
             }
         });
 
-        eprintln!("Calling ASWebAuthenticationSession with URL: {auth_url}");
+        tracing::trace!("Calling ASWebAuthenticationSession with URL: {auth_url}");
 
         unsafe {
             let mtm = MainThreadMarker::new().ok_or(Error::NeedsToRunOnMainThread)?;
-            let presentation_context_provider =
-                PresentationContextProvider::new(mtm, options.window);
+            let presentation_context_provider = PresentationContextProvider::new(mtm, window);
             let session = ASWebAuthenticationSession::initWithURL_callback_completionHandler(
                 ASWebAuthenticationSession::alloc(),
                 &NSURL::URLWithString(&NSString::from_str(auth_url.as_str())).unwrap(),
@@ -128,7 +128,7 @@ define_class!(
                 if let Some(window) = key_window {
                     Retained::autorelease_return(window) as *mut ASPresentationAnchor
                 } else {
-                    eprintln!("No key window found for ASWebAuthenticationSession.");
+                    tracing::error!("No key window found for ASWebAuthenticationSession.");
                     std::ptr::null_mut()
                 }
             }

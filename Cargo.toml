@@ -6,9 +6,10 @@ edition = "2024"
 [dependencies]
 thiserror = "2.0.12"
 url = "2.5.4"
+futures = "0.3.31"
+tracing = "0.1.41"
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
-futures = "0.3.31"
 objc2 = "0.6.1"
 objc2-foundation = { version = "0.3.1", features = [
     "NSString",
@@ -25,6 +26,10 @@ block2 = "0.6.1"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.1" }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+wry = { version = "0.52.1", features = ["tracing"] }
+gtk = "0.18"                                         # Use the version wry uses
+
 [dev-dependencies]
 wae = "0.2.0"
 winit = "0.30.11"
@@ -32,4 +37,7 @@ openidconnect = { version = "4.0.0", default-features = false }
 anyhow = "1.0.98"
 clap = { version = "4.5.40", features = ["derive"] }
 nyquest = { version = "0.2.0", features = ["async"] }
-nyquest-preset = { version = "0.2.0", default-features = false, features = ["async"] }
+nyquest-preset = { version = "0.2.0", default-features = false, features = [
+    "async",
+] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

@@ -32,6 +32,7 @@ impl<'c> AsyncHttpClient<'c> for BasicHttpClient {
     fn call(&'c self, request: openidconnect::HttpRequest) -> Self::Future {
         let client = self.client.clone();
         let (header, body) = request.into_parts();
+        tracing::trace!("Requesting {:?}", header.uri);
         Box::pin(async move {
             let content_type = header
                 .headers
@@ -39,14 +40,7 @@ impl<'c> AsyncHttpClient<'c> for BasicHttpClient {
                 .map(|val| val.to_str().unwrap())
                 .unwrap_or("application/octet-stream");
             let mut ny_request = Request::new(
-                match header.method.as_str() {
-                    "GET" => Method::get(),
-                    "POST" => Method::post(),
-                    "PUT" => Method::put(),
-                    "DELETE" => Method::delete(),
-                    "PATCH" => Method::patch(),
-                    x => Method::custom(x.to_owned()),
-                },
+                Method::custom(header.method.as_str().to_owned()),
                 header.uri.to_string(),
             )
             .with_body(nyquest::Body::bytes(body, content_type.to_owned()));
@@ -59,6 +53,7 @@ impl<'c> AsyncHttpClient<'c> for BasicHttpClient {
             let ny_response = client.request(ny_request).await?;
             let response_builder = openidconnect::http::response::Builder::new()
                 .status(StatusCode::from_u16(ny_response.status().code()).unwrap());
+            tracing::trace!("Got response: {ny_response:?}");
             let bytes = ny_response.bytes().await?;
 
             Ok(response_builder.body(bytes).unwrap())
