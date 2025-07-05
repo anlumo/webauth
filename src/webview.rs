@@ -8,7 +8,7 @@ use wry::WebViewBuilderExtUnix;
 #[cfg(target_os = "windows")]
 use wry::raw_window_handle::HasWindowHandle;
 use wry::{
-    WebViewBuilder,
+    WebViewAttributes, WebViewBuilder,
     http::{HeaderMap, HeaderName, HeaderValue},
 };
 
@@ -26,7 +26,14 @@ impl WebAuthSession {
         let callback_scheme = format!("{callback_scheme}:");
         let (sender, receiver) = futures::channel::oneshot::channel();
         let sender = std::cell::RefCell::new(Some(sender));
-        let builder = WebViewBuilder::new()
+        let attributes = WebViewAttributes {
+            user_agent: Some("WebAuth".to_string()),
+            incognito: options.prefers_ephemeral_web_browser_session,
+            focused: true,
+            ..Default::default()
+        };
+
+        let builder = WebViewBuilder::new_with_attributes(attributes)
             .with_navigation_handler(move |url| {
                 if url.starts_with(&callback_scheme)
                     && let Some(sender) = sender.take()
@@ -39,7 +46,6 @@ impl WebAuthSession {
                     true
                 }
             })
-            .with_incognito(options.prefers_ephemeral_web_browser_session)
             .with_headers(
                 options
                     .additional_header_fields

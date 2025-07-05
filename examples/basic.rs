@@ -130,10 +130,10 @@ impl Hook for Application {
                     use gtk::traits::WidgetExt;
 
                     window = gtk::Window::builder()
-                        .name("WebAuth Example")
+                        .title("WebAuth Example")
                         .resizable(true)
-                        .height_request(800)
-                        .width_request(800)
+                        .default_height(800)
+                        .default_width(800)
                         .build();
                     window.show_all();
                 }
@@ -174,7 +174,13 @@ impl Hook for Application {
                 )
                 .await
                 .expect("Failed openid");
-                println!("Access token: {:?}", token.access_token().secret());
+                tracing::info!("Access token: {:?}", token.access_token().secret());
+                #[cfg(target_os = "linux")]
+                {
+                    use gtk::traits::GtkWindowExt;
+
+                    window.close();
+                }
             });
         }
         #[cfg(any(
@@ -187,7 +193,7 @@ impl Hook for Application {
         while gtk::events_pending() {
             gtk::main_iteration_do(false);
         }
-        Ok(winit::event_loop::ControlFlow::Wait)
+        Ok(winit::event_loop::ControlFlow::Poll)
     }
 
     fn new_events(
