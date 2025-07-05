@@ -137,7 +137,7 @@ impl Hook for Application {
                         .build();
                     window.show_all();
                 }
-                #[cfg(any(target_os = "windows", target_os = "android"))]
+                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
                 {
                     window = wae::create_window(
                         Window::default_attributes().with_title("WebAuth Browser"),

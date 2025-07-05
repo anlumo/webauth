@@ -20,7 +20,7 @@ impl WebAuthSession {
         callback_scheme: &str,
         options: crate::WebAuthOptions,
         #[cfg(target_os = "linux")] widget: &impl IsA<Container>,
-        #[cfg(any(target_os = "windows", target_os = "android"))] window: impl HasWindowHandle,
+        #[cfg(not(target_os = "linux"))] window: impl HasWindowHandle,
     ) -> Result<url::Url, crate::error::Error> {
         tracing::trace!("Calling authenticate with URL: {auth_url}");
         let callback_scheme = format!("{callback_scheme}:");
