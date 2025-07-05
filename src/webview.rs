@@ -62,7 +62,7 @@ impl WebAuthSession {
         {
             web_view = builder.build_gtk(widget)?;
         }
-        #[cfg(target_os = "windows")]
+        #[cfg(not(target_os = "linux"))]
         {
             web_view = builder.build(&window)?;
         }

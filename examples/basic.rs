@@ -137,6 +137,12 @@ impl Hook for Application {
                         .build();
                     window.show_all();
                 }
+                #[cfg(any(target_os = "windows", target_os = "android"))]
+                {
+                    window = wae::create_window(
+                        Window::default_attributes().with_title("WebAuth Browser"),
+                    )?;
+                }
                 let (token, _) = openid::run(
                     auth_url,
                     client_id,
@@ -181,6 +187,7 @@ impl Hook for Application {
 
                     window.close();
                 }
+                drop(window);
             });
         }
         #[cfg(any(
@@ -190,10 +197,14 @@ impl Hook for Application {
             target_os = "netbsd",
             target_os = "openbsd",
         ))]
-        while gtk::events_pending() {
-            gtk::main_iteration_do(false);
+        {
+            while gtk::events_pending() {
+                gtk::main_iteration_do(false);
+            }
+            return Ok(winit::event_loop::ControlFlow::Poll);
         }
-        Ok(winit::event_loop::ControlFlow::Poll)
+        #[allow(unused)]
+        Ok(winit::event_loop::ControlFlow::Wait)
     }
 
     fn new_events(
