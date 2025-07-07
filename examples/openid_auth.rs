@@ -163,7 +163,7 @@ impl Hook for Application {
                         Retained::from_raw(window_handle.ns_view.as_ptr().cast())
                     }
                     .expect("Failed to retain NSView");
-                    window = Some(view.window().expect("Failed to get NSWindow from NSView"));
+                    window = view.window().expect("Failed to get NSWindow from NSView");
                     window_wait = futures::future::pending::<()>();
                 }
                 #[cfg(target_os = "linux")]

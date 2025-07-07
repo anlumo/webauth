@@ -21,7 +21,7 @@ impl WebAuthSession {
         auth_url: &url::Url,
         callback_scheme: &str,
         options: crate::WebAuthOptions,
-        window: Option<objc2::rc::Retained<objc2_app_kit::NSWindow>>, // None => use key window
+        window: &objc2::rc::Retained<objc2_app_kit::NSWindow>,
     ) -> Result<url::Url, crate::error::Error> {
         let (sender, receiver) = futures::channel::oneshot::channel();
         let sender = RefCell::new(Some(sender));
@@ -56,7 +56,8 @@ impl WebAuthSession {
 
         unsafe {
             let mtm = MainThreadMarker::new().ok_or(Error::NeedsToRunOnMainThread)?;
-            let presentation_context_provider = PresentationContextProvider::new(mtm, window);
+            let presentation_context_provider =
+                PresentationContextProvider::new(mtm, window.clone());
             let session = ASWebAuthenticationSession::initWithURL_callback_completionHandler(
                 ASWebAuthenticationSession::alloc(),
                 &NSURL::URLWithString(&NSString::from_str(auth_url.as_str())).unwrap(),
@@ -98,7 +99,7 @@ impl WebAuthSession {
 
 #[derive(Debug, Clone)]
 struct Ivars {
-    window: Option<Retained<objc2_app_kit::NSWindow>>,
+    window: Retained<objc2_app_kit::NSWindow>,
 }
 
 define_class!(
@@ -118,29 +119,13 @@ define_class!(
             &self,
             _session: &ASWebAuthenticationSession,
         ) -> *mut ASPresentationAnchor {
-            if let Some(window) = &self.ivars().window {
-                // If a specific window is provided, use it.
-                Retained::autorelease_return(window.clone()) as *mut ASPresentationAnchor
-            } else {
-                // Otherwise, use the key window of the shared application.
-                let mtm = MainThreadMarker::from(self);
-                let key_window = objc2_app_kit::NSApplication::sharedApplication(mtm).keyWindow();
-                if let Some(window) = key_window {
-                    Retained::autorelease_return(window) as *mut ASPresentationAnchor
-                } else {
-                    tracing::error!("No key window found for ASWebAuthenticationSession.");
-                    std::ptr::null_mut()
-                }
-            }
+            Retained::autorelease_return(self.ivars().window.clone()) as *mut ASPresentationAnchor
         }
     }
 );
 
 impl PresentationContextProvider {
-    fn new(
-        mtm: MainThreadMarker,
-        window: Option<Retained<objc2_app_kit::NSWindow>>,
-    ) -> Retained<Self> {
+    fn new(mtm: MainThreadMarker, window: Retained<objc2_app_kit::NSWindow>) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(Ivars { window });
         // Call `NSObject`'s `init` method.
         unsafe { msg_send![super(this), init] }
