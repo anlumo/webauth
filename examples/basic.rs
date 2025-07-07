@@ -1,6 +1,7 @@
 use std::sync::atomic::AtomicBool;
 
 use clap::Parser;
+use futures::{FutureExt, select};
 use openidconnect::OAuth2TokenResponse;
 use url::Url;
 use wae::{Hook, WindowHandler, WinitWindow};
@@ -85,6 +86,44 @@ impl WindowHandler for Window {
     }
 }
 
+#[cfg(not(any(target_vendor = "apple", target_os = "linux")))]
+struct BrowserWindow {
+    window: winit::window::Window,
+    close_requested: wae::Signal<()>,
+}
+
+#[cfg(not(any(target_vendor = "apple", target_os = "linux")))]
+impl Default for BrowserWindow {
+    fn default() -> Self {
+        let window = wae::create_window(
+            winit::window::Window::default_attributes().with_title("WebAuth Browser"),
+        )
+        .expect("Failed to create window");
+
+        Self {
+            window,
+            close_requested: wae::Signal::default(),
+        }
+    }
+}
+
+#[cfg(not(any(target_vendor = "apple", target_os = "linux")))]
+impl WinitWindow for BrowserWindow {
+    fn id(&self) -> winit::window::WindowId {
+        self.window.id()
+    }
+}
+
+#[cfg(not(any(target_vendor = "apple", target_os = "linux")))]
+impl WindowHandler for BrowserWindow {
+    fn on_close_requested(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.close_requested
+            .set(())
+            .map_err(|_| "Failed to set close signal")?;
+        Ok(())
+    }
+}
+
 struct Application {
     auth_requested: AtomicBool,
     main_window: std::rc::Rc<Window>,
@@ -106,6 +145,7 @@ impl Hook for Application {
             wae::spawn(async move {
                 let options = WebAuthOptions::default();
                 let window;
+                let window_wait;
                 #[cfg(target_os = "macos")]
                 {
                     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -124,6 +164,7 @@ impl Hook for Application {
                     }
                     .expect("Failed to retain NSView");
                     window = Some(view.window().expect("Failed to get NSWindow from NSView"));
+                    window_wait = futures::future::pending::<()>();
                 }
                 #[cfg(target_os = "linux")]
                 {
@@ -136,51 +177,59 @@ impl Hook for Application {
                         .default_width(800)
                         .build();
                     window.show_all();
+                    window_wait = futures::future::pending::<()>();
                 }
                 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
                 {
-                    window = wae::create_window(
-                        Window::default_attributes().with_title("WebAuth Browser"),
-                    )?;
+                    window = std::rc::Rc::new(BrowserWindow::default());
+                    wae::register_window(&window);
+                    window_wait = window.close_requested.wait();
                 }
-                let (token, _) = openid::run(
-                    auth_url,
-                    client_id,
-                    Url::parse("com.dungeonfog.foobar:authorized").unwrap(),
-                    async |url| {
-                        let result_url = WebAuthSession::authenticate(
-                            &url,
-                            "com.dungeonfog.foobar",
-                            options,
-                            #[cfg(not(target_os = "linux"))]
-                            window,
-                            #[cfg(target_os = "linux")]
-                            &window,
-                        )
-                        .await?;
-                        let mut code = None;
-                        let mut state = None;
-                        for (key, value) in result_url.query_pairs() {
-                            if key == "code" {
-                                code = Some(value.to_string());
-                            } else if key == "state" {
-                                state = Some(value.to_string());
+
+                select! {
+                    login = openid::run(
+                        auth_url,
+                        client_id,
+                        Url::parse("com.dungeonfog.foobar:authorized").unwrap(),
+                        async |url| {
+                            let result_url = WebAuthSession::authenticate(
+                                &url,
+                                "com.dungeonfog.foobar",
+                                options,
+                                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+                                &window.window,
+                                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                                &window,
+                            )
+                            .await?;
+                            let mut code = None;
+                            let mut state = None;
+                            for (key, value) in result_url.query_pairs() {
+                                if key == "code" {
+                                    code = Some(value.to_string());
+                                } else if key == "state" {
+                                    state = Some(value.to_string());
+                                }
                             }
-                        }
-                        if let Some(code) = code
-                            && let Some(state) = state
-                        {
-                            Ok((code, state))
-                        } else {
-                            anyhow::bail!(
-                                "Authorization url doesn't contain both a code and a state"
-                            );
-                        }
-                    },
-                )
-                .await
-                .expect("Failed openid");
-                tracing::info!("Access token: {:?}", token.access_token().secret());
+                            if let Some(code) = code
+                                && let Some(state) = state
+                            {
+                                Ok((code, state))
+                            } else {
+                                anyhow::bail!(
+                                    "Authorization url doesn't contain both a code and a state"
+                                );
+                            }
+                        },
+                    ).fuse() => {
+                        let (token, _) = login.expect("Failed openid");
+                        tracing::info!("Access token: {:?}", token.access_token().secret());
+                    }
+                    _ = window_wait.fuse() => {
+                        tracing::info!("Browser window closed prematurely.");
+                    }
+                }
+
                 #[cfg(target_os = "linux")]
                 {
                     use gtk::traits::GtkWindowExt;
