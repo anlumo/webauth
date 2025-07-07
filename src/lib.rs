@@ -9,9 +9,9 @@ use std::collections::HashMap;
 pub use error::Error;
 
 #[cfg(target_vendor = "apple")]
-pub use darwin::WebAuthSession;
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "android"))]
-pub use webview::WebAuthSession;
+pub use darwin::authenticate;
+#[cfg(not(target_vendor = "apple"))]
+pub use webview::authenticate;
 
 #[derive(Debug, Default)]
 pub struct WebAuthOptions {

@@ -14,87 +14,80 @@ use objc2_foundation::{NSDictionary, NSError, NSObject, NSObjectProtocol, NSStri
 
 use crate::Error;
 
-pub struct WebAuthSession;
-
-impl WebAuthSession {
-    pub async fn authenticate(
-        auth_url: &url::Url,
-        callback_scheme: &str,
-        options: crate::WebAuthOptions,
-        window: &objc2::rc::Retained<objc2_app_kit::NSWindow>,
-    ) -> Result<url::Url, crate::error::Error> {
-        let (sender, receiver) = futures::channel::oneshot::channel();
-        let sender = RefCell::new(Some(sender));
-        let completion_handler = RcBlock::new(move |url: *mut NSURL, error: *mut NSError| {
-            tracing::trace!("Completion handler called with URL: {url:?}, error: {error:?}");
-            if let Some(sender) = sender.take() {
-                if url.is_null() && !error.is_null() {
-                    let error = unsafe { objc2::rc::Retained::retain(error) }.unwrap();
-                    tracing::error!(
-                        "Error in ASWebAuthenticationSession: {:?}",
-                        error.debugDescription()
-                    );
-                    sender.send(Err(Error::Darwin(error))).ok();
-                } else if !url.is_null() {
-                    if let Some(s) = unsafe { url.as_ref().unwrap().absoluteString() } {
-                        autoreleasepool(|pool| match url::Url::parse(unsafe { s.to_str(pool) }) {
-                            Ok(url) => {
-                                sender.send(Ok(url)).ok();
-                            }
-                            Err(err) => {
-                                sender.send(Err(Error::InvalidUrlInResponse(err))).ok();
-                            }
-                        })
-                    } else {
-                        sender.send(Err(Error::NoUrlInResponse)).ok();
-                    }
+pub async fn authenticate(
+    auth_url: &url::Url,
+    callback_scheme: &str,
+    options: crate::WebAuthOptions,
+    window: &objc2::rc::Retained<objc2_app_kit::NSWindow>,
+) -> Result<url::Url, crate::error::Error> {
+    let (sender, receiver) = futures::channel::oneshot::channel();
+    let sender = RefCell::new(Some(sender));
+    let completion_handler = RcBlock::new(move |url: *mut NSURL, error: *mut NSError| {
+        tracing::trace!("Completion handler called with URL: {url:?}, error: {error:?}");
+        if let Some(sender) = sender.take() {
+            if url.is_null() && !error.is_null() {
+                let error = unsafe { objc2::rc::Retained::retain(error) }.unwrap();
+                tracing::error!(
+                    "Error in ASWebAuthenticationSession: {:?}",
+                    error.debugDescription()
+                );
+                sender.send(Err(Error::Darwin(error))).ok();
+            } else if !url.is_null() {
+                if let Some(s) = unsafe { url.as_ref().unwrap().absoluteString() } {
+                    autoreleasepool(|pool| match url::Url::parse(unsafe { s.to_str(pool) }) {
+                        Ok(url) => {
+                            sender.send(Ok(url)).ok();
+                        }
+                        Err(err) => {
+                            sender.send(Err(Error::InvalidUrlInResponse(err))).ok();
+                        }
+                    })
+                } else {
+                    sender.send(Err(Error::NoUrlInResponse)).ok();
                 }
             }
-        });
+        }
+    });
 
-        tracing::trace!("Calling ASWebAuthenticationSession with URL: {auth_url}");
+    tracing::trace!("Calling ASWebAuthenticationSession with URL: {auth_url}");
 
-        unsafe {
-            let mtm = MainThreadMarker::new().ok_or(Error::NeedsToRunOnMainThread)?;
-            let presentation_context_provider =
-                PresentationContextProvider::new(mtm, window.clone());
-            let session = ASWebAuthenticationSession::initWithURL_callback_completionHandler(
-                ASWebAuthenticationSession::alloc(),
-                &NSURL::URLWithString(&NSString::from_str(auth_url.as_str())).unwrap(),
-                &ASWebAuthenticationSessionCallback::callbackWithCustomScheme(&NSString::from_str(
-                    callback_scheme,
-                )),
-                RcBlock::as_ptr(&completion_handler),
-            );
-            session.setPrefersEphemeralWebBrowserSession(
-                options.prefers_ephemeral_web_browser_session,
-            );
-            if !options.additional_header_fields.is_empty() {
-                let keys: Vec<_> = options
-                    .additional_header_fields
-                    .keys()
-                    .map(|key| NSString::from_str(key))
-                    .collect::<Vec<_>>();
+    unsafe {
+        let mtm = MainThreadMarker::new().ok_or(Error::NeedsToRunOnMainThread)?;
+        let presentation_context_provider = PresentationContextProvider::new(mtm, window.clone());
+        let session = ASWebAuthenticationSession::initWithURL_callback_completionHandler(
+            ASWebAuthenticationSession::alloc(),
+            &NSURL::URLWithString(&NSString::from_str(auth_url.as_str())).unwrap(),
+            &ASWebAuthenticationSessionCallback::callbackWithCustomScheme(&NSString::from_str(
+                callback_scheme,
+            )),
+            RcBlock::as_ptr(&completion_handler),
+        );
+        session.setPrefersEphemeralWebBrowserSession(options.prefers_ephemeral_web_browser_session);
+        if !options.additional_header_fields.is_empty() {
+            let keys: Vec<_> = options
+                .additional_header_fields
+                .keys()
+                .map(|key| NSString::from_str(key))
+                .collect::<Vec<_>>();
 
-                session.setAdditionalHeaderFields(Some(&NSDictionary::from_retained_objects::<
-                    NSString,
-                >(
+            session.setAdditionalHeaderFields(Some(
+                &NSDictionary::from_retained_objects::<NSString>(
                     &keys.iter().map(|key| key.as_ref()).collect::<Vec<_>>(),
                     &options
                         .additional_header_fields
                         .values()
                         .map(|value| NSString::from_str(value))
                         .collect::<Vec<_>>(),
-                )));
-            }
-
-            let pcp = ProtocolObject::from_retained(presentation_context_provider);
-            session.setPresentationContextProvider(Some(&pcp));
-            session.start();
+                ),
+            ));
         }
 
-        receiver.await.unwrap_or(Err(Error::Aborted))
+        let pcp = ProtocolObject::from_retained(presentation_context_provider);
+        session.setPresentationContextProvider(Some(&pcp));
+        session.start();
     }
+
+    receiver.await.unwrap_or(Err(Error::Aborted))
 }
 
 #[derive(Debug, Clone)]

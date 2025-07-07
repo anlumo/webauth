@@ -2,7 +2,7 @@
 
 An authentication crate for Desktop applications written in Rust that have to implement web-based login workflows like openid or oauth2.
 
-The idea is that you pass in a full URL and a URL scheme to the crate's main entry point `WebAuthSession::authenticate`. Then, the web page referenced by the URL is opened in a web browser. Whenever the page redirects to a URL of the supplied scheme, it ends the browser session and returns the full redirect URL.
+The idea is that you pass in a full URL and a URL scheme to the crate's main entry point `authenticate`. Then, the web page referenced by the URL is opened in a web browser. Whenever the page redirects to a URL of the supplied scheme, it ends the browser session and returns the full redirect URL.
 
 The crate has been tested on Linux/Wayland, macOS and Windows. It should also run unchanged on X11 and Android, but these haven't been tested yet. iOS support is still pending and probably not a lot of work (it's mostly identical to the macOS implementation, but needs UIWindow instead of NSWindow).
 
