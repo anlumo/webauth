@@ -12,13 +12,13 @@ pub enum Error {
     Aborted,
     #[error("Needs to run on main thread")]
     NeedsToRunOnMainThread,
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_vendor = "apple"))]
     #[error("Wry error: {0}")]
     Wry(#[from] wry::Error),
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_vendor = "apple"))]
     #[error("Invalid header name: {0}")]
     InvalidHeaderName(#[from] wry::http::header::InvalidHeaderName),
-    #[cfg(target_os = "linux")]
+    #[cfg(not(target_vendor = "apple"))]
     #[error("Invalid header value: {0}")]
     InvalidHeaderValue(#[from] wry::http::header::InvalidHeaderValue),
 }

@@ -26,9 +26,11 @@ block2 = "0.6.1"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3.1" }
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(not(target_vendor = "apple"))'.dependencies]
 wry = { version = "0.52.1", features = ["tracing"] }
-gtk = "0.18"                                         # Use the version wry uses
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18" # Use the version wry uses
 
 [dev-dependencies]
 wae = "0.2.0"

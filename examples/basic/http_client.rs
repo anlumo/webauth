@@ -39,6 +39,7 @@ impl<'c> AsyncHttpClient<'c> for BasicHttpClient {
                 .get(CONTENT_TYPE)
                 .map(|val| val.to_str().unwrap())
                 .unwrap_or("application/octet-stream");
+            tracing::debug!("Body: {:?}", str::from_utf8(&body));
             let mut ny_request = Request::new(
                 Method::custom(header.method.as_str().to_owned()),
                 header.uri.to_string(),
@@ -46,8 +47,11 @@ impl<'c> AsyncHttpClient<'c> for BasicHttpClient {
             .with_body(nyquest::Body::bytes(body, content_type.to_owned()));
 
             for (key, value) in header.headers.iter() {
-                ny_request = ny_request
-                    .with_header(key.as_str().to_owned(), value.to_str().unwrap().to_owned());
+                if key != CONTENT_TYPE {
+                    tracing::trace!("Adding header \"{key}: {value:?}\"");
+                    ny_request = ny_request
+                        .with_header(key.as_str().to_owned(), value.to_str().unwrap().to_owned());
+                }
             }
 
             let ny_response = client.request(ny_request).await?;
