@@ -7,9 +7,9 @@ use url::Url;
 use wae::{Hook, WindowHandler, WinitWindow};
 use webauth::{WebAuthOptions, WebAuthSession};
 
-#[path = "basic/http_client.rs"]
+#[path = "openid_auth/http_client.rs"]
 mod http_client;
-#[path = "basic/openid.rs"]
+#[path = "openid_auth/openid.rs"]
 mod openid;
 
 #[derive(Parser)]
