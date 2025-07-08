@@ -4,6 +4,9 @@ mod error;
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "android"))]
 mod webview;
 
+#[cfg(target_os = "linux")]
+pub use gtk;
+
 use std::collections::HashMap;
 
 pub use error::Error;
