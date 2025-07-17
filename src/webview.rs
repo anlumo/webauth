@@ -8,7 +8,7 @@ use wry::WebViewBuilderExtUnix;
 #[cfg(target_os = "windows")]
 use wry::raw_window_handle::HasWindowHandle;
 use wry::{
-    WebViewAttributes, WebViewBuilder,
+    WebView, WebViewAttributes, WebViewBuilder,
     http::{HeaderMap, HeaderName, HeaderValue},
 };
 
@@ -18,11 +18,12 @@ pub async fn authenticate(
     options: crate::WebAuthOptions,
     #[cfg(target_os = "linux")] widget: &impl IsA<Container>,
     #[cfg(not(target_os = "linux"))] window: &impl HasWindowHandle,
-) -> Result<url::Url, crate::error::Error> {
+    callback: impl FnOnce(Result<url::Url, crate::error::Error>) + 'static,
+) -> CancelToken {
     tracing::trace!("Calling authenticate with URL: {auth_url}");
     let callback_scheme = format!("{callback_scheme}:");
-    let (sender, receiver) = futures::channel::oneshot::channel();
-    let sender = std::cell::RefCell::new(Some(sender));
+    let callback = RefCell::new(Some(callback));
+
     let attributes = WebViewAttributes {
         user_agent: Some("WebAuth".to_string()),
         incognito: options.prefers_ephemeral_web_browser_session,
@@ -33,11 +34,9 @@ pub async fn authenticate(
     let builder = WebViewBuilder::new_with_attributes(attributes)
         .with_navigation_handler(move |url| {
             if url.starts_with(&callback_scheme)
-                && let Some(sender) = sender.take()
+                && let Some(callback) = callback.take()
             {
-                sender
-                    .send(Url::parse(&url).map_err(crate::Error::InvalidUrlInResponse))
-                    .ok();
+                callback(Url::parse(&url).map_err(crate::Error::InvalidUrlInResponse));
                 false
             } else {
                 true
@@ -64,7 +63,37 @@ pub async fn authenticate(
         web_view = builder.build(window)?;
     }
 
+    CancelToken { web_view }
+}
+
+pub struct CancelToken {
+    web_view: WebView,
+}
+
+pub async fn authenticate_async(
+    auth_url: &url::Url,
+    callback_scheme: &str,
+    options: crate::WebAuthOptions,
+    #[cfg(target_os = "linux")] widget: &impl IsA<Container>,
+    #[cfg(not(target_os = "linux"))] window: &impl HasWindowHandle,
+) -> Result<url::Url, crate::error::Error> {
+    let (sender, receiver) = futures::channel::oneshot::channel();
+
+    let cancel_token = authenticate(
+        auth_url,
+        callback_scheme,
+        options,
+        #[cfg(target_os = "linux")]
+        widget,
+        #[cfg(not(target_os = "linux"))]
+        window,
+        move |result| {
+            sender.send(result).ok();
+        },
+    );
+
     let result = receiver.await.unwrap_or(Err(crate::Error::Aborted));
-    drop(web_view);
+    drop(cancel_token);
+
     result
 }

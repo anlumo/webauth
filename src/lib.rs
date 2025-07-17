@@ -12,9 +12,9 @@ use std::collections::HashMap;
 pub use error::Error;
 
 #[cfg(target_vendor = "apple")]
-pub use darwin::authenticate;
+pub use darwin::{CancelToken, authenticate, authenticate_async};
 #[cfg(not(target_vendor = "apple"))]
-pub use webview::authenticate;
+pub use webview::{CancelToken, authenticate, authenticate_async};
 
 #[derive(Debug, Default)]
 pub struct WebAuthOptions {

@@ -19,35 +19,35 @@ pub fn authenticate(
     callback_scheme: &str,
     options: crate::WebAuthOptions,
     window: &objc2::rc::Retained<objc2_app_kit::NSWindow>,
-) -> AuthenticationFuture {
+    callback: impl FnOnce(Result<url::Url, crate::Error>) + 'static,
+) -> CancelToken {
     // NSWindow is not Send and must not be created on any other thread than the main thread
     // so this panic should never happen anyways.
     let mtm = MainThreadMarker::new().expect("NSWindow passed on non-main thread");
+    let callback = RefCell::new(Some(callback));
 
-    let (sender, receiver) = futures::channel::oneshot::channel();
-    let sender = RefCell::new(Some(sender));
     let completion_handler = RcBlock::new(move |url: *mut NSURL, error: *mut NSError| {
         tracing::trace!("Completion handler called with URL: {url:?}, error: {error:?}");
-        if let Some(sender) = sender.take() {
+        if let Some(callback) = callback.take() {
             if url.is_null() && !error.is_null() {
                 let error = unsafe { objc2::rc::Retained::retain(error) }.unwrap();
                 tracing::error!(
                     "Error in ASWebAuthenticationSession: {:?}",
                     error.debugDescription()
                 );
-                sender.send(Err(Error::Darwin(error))).ok();
+                callback(Err(Error::Darwin(error)));
             } else if !url.is_null() {
                 if let Some(s) = unsafe { url.as_ref().unwrap().absoluteString() } {
                     autoreleasepool(|pool| match url::Url::parse(unsafe { s.to_str(pool) }) {
                         Ok(url) => {
-                            sender.send(Ok(url)).ok();
+                            callback(Ok(url));
                         }
                         Err(err) => {
-                            sender.send(Err(Error::InvalidUrlInResponse(err))).ok();
+                            callback(Err(Error::InvalidUrlInResponse(err)));
                         }
                     })
                 } else {
-                    sender.send(Err(Error::NoUrlInResponse)).ok();
+                    callback(Err(Error::NoUrlInResponse));
                 }
             }
         }
@@ -65,6 +65,7 @@ pub fn authenticate(
             RcBlock::as_ptr(&completion_handler),
         )
     };
+
     unsafe {
         session.setPrefersEphemeralWebBrowserSession(options.prefers_ephemeral_web_browser_session);
     }
@@ -95,12 +96,45 @@ pub fn authenticate(
         session.start();
     }
 
-    AuthenticationFuture { receiver, session }
+    CancelToken {
+        session,
+        _completion_handler: completion_handler,
+    }
+}
+
+pub struct CancelToken {
+    session: Retained<ASWebAuthenticationSession>,
+    _completion_handler: RcBlock<dyn Fn(*mut NSURL, *mut NSError)>,
+}
+
+impl Drop for CancelToken {
+    fn drop(&mut self) {
+        unsafe {
+            self.session.cancel();
+        }
+    }
+}
+
+pub fn authenticate_async(
+    auth_url: &url::Url,
+    callback_scheme: &str,
+    options: crate::WebAuthOptions,
+    window: &objc2::rc::Retained<objc2_app_kit::NSWindow>,
+) -> AuthenticationFuture {
+    let (sender, receiver) = futures::channel::oneshot::channel();
+    let token = authenticate(auth_url, callback_scheme, options, window, move |result| {
+        sender.send(result).ok();
+    });
+
+    AuthenticationFuture {
+        receiver,
+        _token: token,
+    }
 }
 
 pub struct AuthenticationFuture {
     receiver: futures::channel::oneshot::Receiver<Result<url::Url, crate::Error>>,
-    session: Retained<ASWebAuthenticationSession>,
+    _token: CancelToken,
 }
 
 impl std::future::Future for AuthenticationFuture {
@@ -115,14 +149,6 @@ impl std::future::Future for AuthenticationFuture {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(v)) => Poll::Ready(v),
             Poll::Ready(Err(_)) => Poll::Ready(Err(crate::Error::Aborted)),
-        }
-    }
-}
-
-impl Drop for AuthenticationFuture {
-    fn drop(&mut self) {
-        unsafe {
-            self.session.cancel();
         }
     }
 }
