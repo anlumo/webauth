@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, pin::Pin, task::Poll};
 
 use block2::RcBlock;
 use objc2::{
@@ -14,12 +14,16 @@ use objc2_foundation::{NSDictionary, NSError, NSObject, NSObjectProtocol, NSStri
 
 use crate::Error;
 
-pub async fn authenticate(
+pub fn authenticate(
     auth_url: &url::Url,
     callback_scheme: &str,
     options: crate::WebAuthOptions,
     window: &objc2::rc::Retained<objc2_app_kit::NSWindow>,
-) -> Result<url::Url, crate::error::Error> {
+) -> AuthenticationFuture {
+    // NSWindow is not Send and must not be created on any other thread than the main thread
+    // so this panic should never happen anyways.
+    let mtm = MainThreadMarker::new().expect("NSWindow passed on non-main thread");
+
     let (sender, receiver) = futures::channel::oneshot::channel();
     let sender = RefCell::new(Some(sender));
     let completion_handler = RcBlock::new(move |url: *mut NSURL, error: *mut NSError| {
@@ -49,27 +53,29 @@ pub async fn authenticate(
         }
     });
 
+    let presentation_context_provider = PresentationContextProvider::new(mtm, window.clone());
     tracing::trace!("Calling ASWebAuthenticationSession with URL: {auth_url}");
-
-    unsafe {
-        let mtm = MainThreadMarker::new().ok_or(Error::NeedsToRunOnMainThread)?;
-        let presentation_context_provider = PresentationContextProvider::new(mtm, window.clone());
-        let session = ASWebAuthenticationSession::initWithURL_callback_completionHandler(
+    let session = unsafe {
+        ASWebAuthenticationSession::initWithURL_callback_completionHandler(
             ASWebAuthenticationSession::alloc(),
             &NSURL::URLWithString(&NSString::from_str(auth_url.as_str())).unwrap(),
             &ASWebAuthenticationSessionCallback::callbackWithCustomScheme(&NSString::from_str(
                 callback_scheme,
             )),
             RcBlock::as_ptr(&completion_handler),
-        );
+        )
+    };
+    unsafe {
         session.setPrefersEphemeralWebBrowserSession(options.prefers_ephemeral_web_browser_session);
-        if !options.additional_header_fields.is_empty() {
-            let keys: Vec<_> = options
-                .additional_header_fields
-                .keys()
-                .map(|key| NSString::from_str(key))
-                .collect::<Vec<_>>();
+    }
+    if !options.additional_header_fields.is_empty() {
+        let keys: Vec<_> = options
+            .additional_header_fields
+            .keys()
+            .map(|key| NSString::from_str(key))
+            .collect::<Vec<_>>();
 
+        unsafe {
             session.setAdditionalHeaderFields(Some(
                 &NSDictionary::from_retained_objects::<NSString>(
                     &keys.iter().map(|key| key.as_ref()).collect::<Vec<_>>(),
@@ -81,13 +87,44 @@ pub async fn authenticate(
                 ),
             ));
         }
+    }
 
-        let pcp = ProtocolObject::from_retained(presentation_context_provider);
+    let pcp = ProtocolObject::from_retained(presentation_context_provider);
+    unsafe {
         session.setPresentationContextProvider(Some(&pcp));
         session.start();
     }
 
-    receiver.await.unwrap_or(Err(Error::Aborted))
+    AuthenticationFuture { receiver, session }
+}
+
+pub struct AuthenticationFuture {
+    receiver: futures::channel::oneshot::Receiver<Result<url::Url, crate::Error>>,
+    session: Retained<ASWebAuthenticationSession>,
+}
+
+impl std::future::Future for AuthenticationFuture {
+    type Output = Result<url::Url, crate::Error>;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let this = unsafe { self.get_unchecked_mut() };
+        match Pin::new(&mut this.receiver).poll(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Ok(v)) => Poll::Ready(v),
+            Poll::Ready(Err(_)) => Poll::Ready(Err(crate::Error::Aborted)),
+        }
+    }
+}
+
+impl Drop for AuthenticationFuture {
+    fn drop(&mut self) {
+        unsafe {
+            self.session.cancel();
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

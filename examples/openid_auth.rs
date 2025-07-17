@@ -1,11 +1,12 @@
 use std::sync::atomic::AtomicBool;
 
+use anyhow::anyhow;
 use clap::Parser;
 use futures::{FutureExt, select};
 use openidconnect::OAuth2TokenResponse;
 use url::Url;
 use wae::{Hook, WindowHandler, WinitWindow};
-use webauth::{WebAuthOptions, WebAuthSession};
+use webauth::WebAuthOptions;
 
 #[path = "openid_auth/http_client.rs"]
 mod http_client;
@@ -192,38 +193,48 @@ impl Hook for Application {
                         client_id,
                         Url::parse("com.dungeonfog.foobar:authorized").unwrap(),
                         async |url| {
-                            let result_url = WebAuthSession::authenticate(
-                                &url,
-                                "com.dungeonfog.foobar",
-                                options,
-                                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-                                &window.window,
-                                #[cfg(any(target_os = "linux", target_os = "macos"))]
-                                &window,
-                            )
-                            .await?;
-                            let mut code = None;
-                            let mut state = None;
-                            for (key, value) in result_url.query_pairs() {
-                                if key == "code" {
-                                    code = Some(value.to_string());
-                                } else if key == "state" {
-                                    state = Some(value.to_string());
+                            select! {
+                                result_url = webauth::authenticate(
+                                    &url,
+                                    "com.dungeonfog.foobar",
+                                    options,
+                                    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+                                    &window.window,
+                                    #[cfg(any(target_os = "linux", target_os = "macos"))]
+                                    &window,
+                                ).fuse() => {
+                                    let result_url = result_url?;
+                                    let mut code = None;
+                                    let mut state = None;
+                                    for (key, value) in result_url.query_pairs() {
+                                        if key == "code" {
+                                            code = Some(value.to_string());
+                                        } else if key == "state" {
+                                            state = Some(value.to_string());
+                                        }
+                                    }
+                                    if let Some(code) = code
+                                        && let Some(state) = state
+                                    {
+                                        Ok((code, state))
+                                    } else {
+                                        anyhow::bail!(
+                                            "Authorization url doesn't contain both a code and a state"
+                                        );
+                                    }
                                 }
-                            }
-                            if let Some(code) = code
-                                && let Some(state) = state
-                            {
-                                Ok((code, state))
-                            } else {
-                                anyhow::bail!(
-                                    "Authorization url doesn't contain both a code and a state"
-                                );
+                                _ = futures_timer::Delay::new(std::time::Duration::from_secs(10)).fuse() => {
+                                    Err(anyhow!("Aborted"))
+                                }
                             }
                         },
                     ).fuse() => {
-                        let (token, _) = login.expect("Failed openid");
-                        tracing::info!("Access token: {:?}", token.access_token().secret());
+                        match login {
+                            Ok((token, _)) => {
+                                tracing::info!("Access token: {:?}", token.access_token().secret());
+                            }
+                            Err(err) => tracing::error!("Authentication failed with {err:?}"),
+                        }
                     }
                     _ = window_wait.fuse() => {
                         tracing::info!("Browser window closed prematurely.");
