@@ -12,7 +12,7 @@ use wry::{
     http::{HeaderMap, HeaderName, HeaderValue},
 };
 
-pub async fn authenticate(
+pub fn authenticate(
     auth_url: &url::Url,
     callback_scheme: &str,
     options: crate::WebAuthOptions,
