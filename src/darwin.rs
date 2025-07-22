@@ -20,7 +20,7 @@ pub fn authenticate(
     options: crate::WebAuthOptions,
     window: &objc2::rc::Retained<objc2_app_kit::NSWindow>,
     callback: impl FnOnce(Result<url::Url, crate::Error>) + 'static,
-) -> CancelToken {
+) -> Result<CancelToken, Error> {
     // NSWindow is not Send and must not be created on any other thread than the main thread
     // so this panic should never happen anyways.
     let mtm = MainThreadMarker::new().expect("NSWindow passed on non-main thread");
@@ -96,10 +96,10 @@ pub fn authenticate(
         session.start();
     }
 
-    CancelToken {
+    Ok(CancelToken {
         session,
         _completion_handler: completion_handler,
-    }
+    })
 }
 
 pub struct CancelToken {
@@ -126,15 +126,12 @@ pub fn authenticate_async(
         sender.send(result).ok();
     });
 
-    AuthenticationFuture {
-        receiver,
-        _token: token,
-    }
+    AuthenticationFuture { receiver, token }
 }
 
 pub struct AuthenticationFuture {
     receiver: futures::channel::oneshot::Receiver<Result<url::Url, crate::Error>>,
-    _token: CancelToken,
+    token: Result<CancelToken, Error>,
 }
 
 impl std::future::Future for AuthenticationFuture {
@@ -145,6 +142,9 @@ impl std::future::Future for AuthenticationFuture {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let this = unsafe { self.get_unchecked_mut() };
+        if let Err(err) = &this.token {
+            return Poll::Ready(Err(err));
+        }
         match Pin::new(&mut this.receiver).poll(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(v)) => Poll::Ready(v),

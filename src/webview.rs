@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{cell::RefCell, str::FromStr};
 
 #[cfg(target_os = "linux")]
 use gtk::{Container, glib::IsA};
@@ -12,14 +12,16 @@ use wry::{
     http::{HeaderMap, HeaderName, HeaderValue},
 };
 
+use crate::Error;
+
 pub fn authenticate(
     auth_url: &url::Url,
     callback_scheme: &str,
     options: crate::WebAuthOptions,
     #[cfg(target_os = "linux")] widget: &impl IsA<Container>,
     #[cfg(not(target_os = "linux"))] window: &impl HasWindowHandle,
-    callback: impl FnOnce(Result<url::Url, crate::error::Error>) + 'static,
-) -> CancelToken {
+    callback: impl FnOnce(Result<url::Url, Error>) + 'static,
+) -> Result<CancelToken, Error> {
     tracing::trace!("Calling authenticate with URL: {auth_url}");
     let callback_scheme = format!("{callback_scheme}:");
     let callback = RefCell::new(Some(callback));
@@ -63,11 +65,13 @@ pub fn authenticate(
         web_view = builder.build(window)?;
     }
 
-    CancelToken { web_view }
+    Ok(CancelToken {
+        _web_view: web_view,
+    })
 }
 
 pub struct CancelToken {
-    web_view: WebView,
+    _web_view: WebView,
 }
 
 pub async fn authenticate_async(
@@ -76,7 +80,7 @@ pub async fn authenticate_async(
     options: crate::WebAuthOptions,
     #[cfg(target_os = "linux")] widget: &impl IsA<Container>,
     #[cfg(not(target_os = "linux"))] window: &impl HasWindowHandle,
-) -> Result<url::Url, crate::error::Error> {
+) -> Result<url::Url, Error> {
     let (sender, receiver) = futures::channel::oneshot::channel();
 
     let cancel_token = authenticate(
@@ -90,7 +94,7 @@ pub async fn authenticate_async(
         move |result| {
             sender.send(result).ok();
         },
-    );
+    )?;
 
     let result = receiver.await.unwrap_or(Err(crate::Error::Aborted));
     drop(cancel_token);
