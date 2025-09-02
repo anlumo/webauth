@@ -122,16 +122,22 @@ pub fn authenticate_async(
     window: &objc2::rc::Retained<objc2_app_kit::NSWindow>,
 ) -> AuthenticationFuture {
     let (sender, receiver) = futures::channel::oneshot::channel();
-    let token = authenticate(auth_url, callback_scheme, options, window, move |result| {
-        sender.send(result).ok();
-    });
+    let token = Some(authenticate(
+        auth_url,
+        callback_scheme,
+        options,
+        window,
+        move |result| {
+            sender.send(result).ok();
+        },
+    ));
 
     AuthenticationFuture { receiver, token }
 }
 
 pub struct AuthenticationFuture {
     receiver: futures::channel::oneshot::Receiver<Result<url::Url, crate::Error>>,
-    token: Result<CancelToken, Error>,
+    token: Option<Result<CancelToken, Error>>,
 }
 
 impl std::future::Future for AuthenticationFuture {
@@ -142,7 +148,7 @@ impl std::future::Future for AuthenticationFuture {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let this = unsafe { self.get_unchecked_mut() };
-        if let Err(err) = &this.token {
+        if let Some(Err(err)) = this.token.take_if(|token| token.is_err()) {
             return Poll::Ready(Err(err));
         }
         match Pin::new(&mut this.receiver).poll(cx) {

@@ -1,4 +1,4 @@
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Clone)]
 #[non_exhaustive]
 pub enum Error {
     #[cfg(target_vendor = "apple")]
