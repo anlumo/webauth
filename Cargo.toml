@@ -4,13 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-thiserror = "2.0.12"
+thiserror = "2.0.16"
 url = ">=2.4.0, <2.6.0"
 futures = "0.3.31"
 tracing = "0.1.41"
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
-objc2 = "0.6.1"
+objc2 = "0.6.2"
 objc2-foundation = { version = "0.3.1", features = [
     "NSString",
     "NSURL",
@@ -28,7 +28,7 @@ dispatch2 = "0.3.0"
 objc2-app-kit = { version = "0.3.1" }
 
 [target.'cfg(not(target_vendor = "apple"))'.dependencies]
-wry = { version = "0.52.1", features = ["tracing"] }
+wry = { version = "0.53.3", features = ["tracing"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18" # Use the version wry uses
