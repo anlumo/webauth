@@ -16,6 +16,9 @@ pub use darwin::{CancelToken, authenticate, authenticate_async};
 #[cfg(not(target_vendor = "apple"))]
 pub use webview::{CancelToken, authenticate, authenticate_async};
 
+#[cfg(target_os = "windows")]
+pub use wry::raw_window_handle;
+
 #[derive(Debug, Default)]
 pub struct WebAuthOptions {
     pub prefers_ephemeral_web_browser_session: bool,
