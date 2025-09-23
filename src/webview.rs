@@ -33,6 +33,9 @@ pub fn authenticate(
         ..Default::default()
     };
 
+    #[cfg(target_os = "linux")]
+    let inner_container = widget.clone();
+
     let builder = WebViewBuilder::new_with_attributes(attributes)
         .with_navigation_handler(move |url| {
             if url.starts_with(&callback_scheme)
@@ -53,7 +56,22 @@ pub fn authenticate(
                 })
                 .collect::<Result<HeaderMap, crate::Error>>()?,
         )
-        .with_url(auth_url.to_string());
+        .with_url(auth_url.to_string())
+        .with_document_title_changed_handler(move |title| {
+            #[cfg(target_os = "linux")]
+            {
+                let obj: &gtk::glib::Object = gtk::glib::Cast::upcast_ref(inner_container.as_ref());
+                if let Some(window) = gtk::glib::Cast::downcast_ref::<gtk::Window>(obj) {
+                    use gtk::traits::GtkWindowExt;
+
+                    window.set_title(&title);
+                }
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                // TODO
+            }
+        });
 
     let web_view;
     #[cfg(target_os = "linux")]
